@@ -1,12 +1,16 @@
 using System;
 
-namespace Converter
+namespace ExpresionConverter
 {
     [AttributeUsage(AttributeTargets.Property)]
-    public class DictionarySourceAttribute : Attribute
+    public abstract class GameMarketsBaseAttribute : Attribute
     {
-        public Type SourceType { get; set; }
-
+        public Type SourceType { get; set; } = typeof(GameStats);
         public string SourcePropertyName { get; set; }
+    }
+
+    [AttributeUsage(AttributeTargets.Property)]
+    public class DictionarySourceAttribute : GameMarketsBaseAttribute
+    {
     }
 }

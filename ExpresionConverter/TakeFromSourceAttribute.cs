@@ -1,6 +1,6 @@
 using System;
 
-namespace Converter
+namespace ExpresionConverter
 {
     [AttributeUsage(AttributeTargets.Property)]
     public class TakeFromSourceAttribute : Attribute

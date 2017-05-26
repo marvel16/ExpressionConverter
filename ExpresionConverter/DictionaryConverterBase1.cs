@@ -1,46 +1,43 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace ExpresionConverter
 {
-    public abstract class DictionaryConverterBase<T, TValue> : JsonConverter
+    public abstract class DictionaryConverterBase1<T, TKey, TValue, TSourceItem> : JsonConverter
     {
         private readonly object[] sources;
 
-        private static readonly Action<JsonWriter, T, object[], Func<KeyValuePair<double, TValue>, double, JToken>, Func<KeyValuePair<string, double>, int, JToken>> Converter;
+        private static readonly Action<JsonWriter, T, object[], Func<KeyValuePair<TKey, TValue>, TSourceItem, JToken>> Converter;
 
-        public DictionaryConverterBase(params object[] sources)
+        public DictionaryConverterBase1(params object[] sources)
         {
             this.sources = sources;
         }
 
-        static DictionaryConverterBase()
+        static DictionaryConverterBase1()
         {
             var writer = Expression.Parameter(typeof(JsonWriter), "writer");
             var value = Expression.Parameter(typeof(T), "value");
             var sources = Expression.Parameter(typeof(object[]), "sources");
-            var doubleDictStrategy = Expression.Parameter(typeof(Func<KeyValuePair<double, TValue>, double, JToken>), "doubleDictStrategy");
-            var stringDictStrategy = Expression.Parameter(typeof(Func<KeyValuePair<string, double>, int, JToken>), "stringDictStrategy");
+            var strategy = Expression.Parameter(typeof(Func<KeyValuePair<TKey, TValue>, TSourceItem, JToken>), "strategy");
 
-            var lambda =
-                Expression
-                    .Lambda<Action<JsonWriter, T, object[], Func<KeyValuePair<double, TValue>, double, JToken>, Func<KeyValuePair<string, double>, int, JToken>>>(
-                                                                                                                                                                   Expression.Block(CreateBody(writer, value, sources, doubleDictStrategy, stringDictStrategy)),
-                                                                                                                                                                   writer,
-                                                                                                                                                                   value,
-                                                                                                                                                                   sources,
-                                                                                                                                                                   doubleDictStrategy,
-                                                                                                                                                                   stringDictStrategy);
+            var lambda = Expression.Lambda<Action<JsonWriter, T, object[], Func<KeyValuePair<TKey, TValue>, TSourceItem, JToken>>>(
+                                                                                                                    Expression.Block(CreateBody(writer, value, sources, strategy)),
+                                                                                                                    writer,
+                                                                                                                    value,
+                                                                                                                    sources,
+                                                                                                                    strategy);
 
             Converter = lambda.Compile();
         }
 
-        private static IEnumerable<Expression> CreateBody(ParameterExpression writer, ParameterExpression value, ParameterExpression sources, ParameterExpression doubleDictStrategy, ParameterExpression stringDictStrategy)
+        private static IEnumerable<Expression> CreateBody(ParameterExpression writer, ParameterExpression value, ParameterExpression sources, ParameterExpression strategy)
         {
             yield return
                 Expression.Call(
@@ -62,72 +59,16 @@ namespace ExpresionConverter
                 DictionarySourceAttribute dictionaryAttribute;
                 BoolSourceAttribute boolAttribute;
                 TakeFromSourceAttribute takeFromSourceAttribute;
+                ListConvertableAttribute listConvertableAttribute;
+
 
                 if (propInfo.PropertyType.IsConstructedGenericType &&
-                    propInfo.PropertyType.GetGenericTypeDefinition() == typeof(Dictionary<,>) &&
-                    propInfo.PropertyType.GenericTypeArguments[0].IsNumeric() &&
-                    propInfo.PropertyType.GenericTypeArguments[1] == typeof(TValue) &&
-                    (dictionaryAttribute = propInfo.GetCustomAttribute<DictionarySourceAttribute>()) != null)
-                {
-                    var source = Expression.Convert(
-                                                    Expression.Call(
-                                                                    typeof(Enumerable),
-                                                                    nameof(Enumerable.Single),
-                                                                    new[] { typeof(object) },
-                                                                    sources,
-                                                                    (Expression<Func<object, bool>>)(src => src.GetType() == dictionaryAttribute.SourceType)),
-                                                    dictionaryAttribute.SourceType);
-
-                    var sourceValue = Expression.Convert(
-                                                         Expression.Property(
-                                                                             source,
-                                                                             dictionaryAttribute.SourcePropertyName),
-                                                                             typeof(double));
-
-                    yield return
-                        Expression.Call(
-                                        writer,
-                                        nameof(JsonWriter.WriteStartObject),
-                                        Type.EmptyTypes);
-
-                    yield return propertyValue.ForEach((item, body) =>
-                                                       {
-                                                           var key = Expression.Property(item, "Key");
-                                                           body.Add(
-                                                                    Expression.Call(
-                                                                                    writer,
-                                                                                    nameof(JsonWriter.WritePropertyName),
-                                                                                    Type.EmptyTypes,
-                                                                                    Expression.Call(key, nameof(ToString), Type.EmptyTypes)));
-
-                                                           var kvp = Expression.New(
-                                                                                    typeof(KeyValuePair<double, TValue>).GetConstructor(new[] { typeof(double), typeof(TValue) }),
-                                                                                    Expression.Convert(key, typeof(double)),
-                                                                                    Expression.Property(item, "Value"));
-
-                                                           body.Add(
-                                                                    Expression.Call(
-                                                                                    Expression.Invoke(doubleDictStrategy, kvp, sourceValue),
-                                                                                    nameof(JToken.WriteTo),
-                                                                                    Type.EmptyTypes,
-                                                                                    writer,
-                                                                                    Expression.Constant(new JsonConverter[0])));
-                                                       });
-
-                    yield return
-                        Expression.Call(
-                                        writer,
-                                        nameof(JsonWriter.WriteEndObject),
-                                        Type.EmptyTypes);
-                }
-                else if (propInfo.PropertyType.IsConstructedGenericType &&
                          propInfo.PropertyType.GetGenericTypeDefinition() == typeof(Dictionary<,>) &&
-                         propInfo.PropertyType.GenericTypeArguments[0] == typeof(string) &&
-                         propInfo.PropertyType.GenericTypeArguments[1] == typeof(double) &&
+                         propInfo.PropertyType.GenericTypeArguments[0] == typeof(TKey) &&
+                         propInfo.PropertyType.GenericTypeArguments[1] == typeof(TValue) &&
                          (dictionaryAttribute = propInfo.GetCustomAttribute<DictionarySourceAttribute>()) != null)
                 {
-                    var source = Expression.Convert(
-                                                    Expression.Call(
+                    var source = Expression.Convert(Expression.Call(
                                                                     typeof(Enumerable),
                                                                     nameof(Enumerable.Single),
                                                                     new[] { typeof(object) },
@@ -135,7 +76,8 @@ namespace ExpresionConverter
                                                                     (Expression<Func<object, bool>>)(src => src.GetType() == dictionaryAttribute.SourceType)),
                                                     dictionaryAttribute.SourceType);
 
-                    var sourceValue = Expression.Property(source, dictionaryAttribute.SourcePropertyName);
+                    var sourceValue = Expression.Convert(Expression.Property(source, dictionaryAttribute.SourcePropertyName),
+                                                        typeof(TSourceItem));
 
                     yield return
                         Expression.Call(
@@ -154,13 +96,13 @@ namespace ExpresionConverter
                                                                                     Expression.Call(key, nameof(ToString), Type.EmptyTypes)));
 
                                                            var kvp = Expression.New(
-                                                                                    typeof(KeyValuePair<string, double>).GetConstructor(new[] { typeof(string), typeof(double) }),
+                                                                                    typeof(KeyValuePair<TKey, TValue>).GetConstructor(new[] { typeof(TKey), typeof(TValue) }),
                                                                                     key,
                                                                                     Expression.Property(item, "Value"));
 
                                                            body.Add(
                                                                     Expression.Call(
-                                                                                    Expression.Invoke(stringDictStrategy, kvp, sourceValue),
+                                                                                    Expression.Invoke(strategy, kvp, sourceValue),
                                                                                     nameof(JToken.WriteTo),
                                                                                     Type.EmptyTypes,
                                                                                     writer,
@@ -215,15 +157,46 @@ namespace ExpresionConverter
                                         Type.EmptyTypes,
                                         sourceValue);
                 }
-                else if(propInfo.PropertyType.IsConstructedGenericType &&
-                        propInfo.PropertyType.GetGenericTypeDefinition() == typeof(List<>) &&
-                        propInfo.PropertyType.GenericTypeArguments[0] == typeof(T))
+                else if ((listConvertableAttribute = propInfo.GetCustomAttribute<ListConvertableAttribute>()) != null)
                 {
-                    List<GameMarkets> gameMarkets = new List<GameMarkets>();
-                    for (int i = 0; i < gameMarkets.Count; i++)
-                    {
-                        
-                    }
+                    yield return
+                        Expression.Call(writer,
+                                        nameof(JsonWriter.WriteStartArray),
+                                        Type.EmptyTypes);
+
+                    var listSource = Expression.Convert(Expression.Call(
+                                                                    typeof(Enumerable),
+                                                                    nameof(Enumerable.Single),
+                                                                    new[] { typeof(object) },
+                                                                    sources,
+                                                                    (Expression<Func<object, bool>>)(src => src.GetType() == listConvertableAttribute.PropertyType)),
+                                                    listConvertableAttribute.PropertyType);
+
+                    var converterType = listConvertableAttribute.ConverterType;
+
+                    var itemIndex = Expression.Variable(typeof(int), "indexExpression");
+                    var index = Expression.Assign(itemIndex, Expression.Constant(0, typeof(int)));
+
+                    yield return listSource.ForEach((item, body) =>
+                                                       {
+                                                           var converter = Expression.New(converterType.GetConstructor(new[] { typeof(object[]) }), Expression.NewArrayInit(typeof(object), item));
+                                                           var target = Expression.ArrayAccess(propertyValue, index);
+                                                           var serializedItem = Expression.Call(Expression.Constant(null), typeof(JsonConvert).GetMethod("SerializeObject", BindingFlags.Public | BindingFlags.Static), target, converter);
+
+                                                           body.Add(Expression.Call(
+                                                                                    writer,
+                                                                                    nameof(JsonWriter.WriteValue),
+                                                                                    Type.EmptyTypes,
+                                                                                    serializedItem));
+
+                                                           body.Add(Expression.Increment(index));
+                                                       });
+
+                    yield return
+                        Expression.Call(
+                                        writer,
+                                        nameof(JsonWriter.WriteEndArray),
+                                        Type.EmptyTypes);
                 }
                 else
                 {
@@ -260,10 +233,9 @@ namespace ExpresionConverter
 
         public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
         {
-            Converter(writer, (T)value, sources, ProcessKvpWithDoubleKey, ProcessKvpWithStringKey);
+            Converter(writer, (T)value, sources, ProcessItem);
         }
 
-        protected abstract JToken ProcessKvpWithDoubleKey(KeyValuePair<double, TValue> item, double sourceValue);
-        protected abstract JToken ProcessKvpWithStringKey(KeyValuePair<string, double> item, int sourceValue);
+        protected abstract JToken ProcessItem(KeyValuePair<TKey, TValue> item, TSourceItem sourceValue);
     }
 }

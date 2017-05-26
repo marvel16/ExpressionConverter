@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Converter
+namespace ExpresionConverter
 {
     public static class TypeExtensions
     {
